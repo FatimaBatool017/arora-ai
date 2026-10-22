@@ -1,7 +1,7 @@
-   streamlit>=1.40
-   google-genai>=1.0
-   python-docx
-   python-pptx
-   openpyxl
-   pandas
-   gTTS
+streamlit>=1.40
+requests
+python-docx
+python-pptx
+openpyxl
+pandas
+gTTS
