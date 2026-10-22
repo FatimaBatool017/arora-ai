@@ -1,7 +1,7 @@
 # arora-ai
 # 🎓 StudyBuddy AI
 
-A Streamlit + Google Gemini study assistant.
+A Streamlit + Google Gemini (REST API, no Google SDK needed) study assistant.
 
 ## Features
 - **Explain**: upload PDF, Word, PowerPoint, Excel, text, image, audio or video and get an easy explanation (3 styles)
@@ -42,6 +42,9 @@ A Streamlit + Google Gemini study assistant.
    GEMINI_API_KEY = "your-key-here"
    ```
 4. Click **Deploy**. When it finishes you get a public link.
+
+## Choose Python 3.12 when deploying
+In **Advanced settings** on the deploy screen, set **Python version** to 3.12 (the newest 3.14 can break some packages). To change it later, delete the app on share.streamlit.io and deploy it again.
 
 ## Optional: bigger uploads
 Streamlit allows 200 MB per file by default. To raise it, create `.streamlit/config.toml`:
