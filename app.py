@@ -7,8 +7,17 @@ import time
 import pandas as pd
 import requests
 import streamlit as st
-MODEL = "gemini-2.5-flash"          # change here if Google renames the Flash model
-IMAGE_MODEL = "gemini-2.5-flash-image"
+# Models are tried in order; if Google retires one (404), the next is used automatically.
+# You can force one by adding GEMINI_MODEL / GEMINI_IMAGE_MODEL to Streamlit secrets.
+MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash"]
+IMAGE_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"]
+try:
+    if st.secrets.get("GEMINI_MODEL"):
+        MODELS = [st.secrets["GEMINI_MODEL"]]
+    if st.secrets.get("GEMINI_IMAGE_MODEL"):
+        IMAGE_MODELS = [st.secrets["GEMINI_IMAGE_MODEL"]]
+except Exception:
+    pass
 API = "https://generativelanguage.googleapis.com"
 BIG_FILE = 15 * 1024 * 1024         # above this, files go through the Gemini Files API
 
@@ -86,6 +95,18 @@ def _post(model, body):
         return r.json()
 
 
+def try_models(models, body):
+    last = None
+    for m in models:
+        try:
+            return _post(m, body)
+        except RuntimeError as e:
+            last = e
+            if not str(e).startswith(("404", "403")):
+                raise
+    raise last
+
+
 def upload_big(data, mime):
     """Gemini Files API (resumable upload) for large files."""
     h = {"X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
@@ -117,7 +138,7 @@ def ask(prompt, src=None, as_json=False):
     body = {"contents": [{"parts": (to_parts(src) if src else []) + [{"text": prompt}]}]}
     if as_json:
         body["generationConfig"] = {"responseMimeType": "application/json"}
-    data = _post(MODEL, body)
+    data = try_models(MODELS, body)
     try:
         return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
     except (KeyError, IndexError):
@@ -125,7 +146,7 @@ def ask(prompt, src=None, as_json=False):
 
 
 def make_image(prompt):
-    data = _post(IMAGE_MODEL, {"contents": [{"parts": [{"text": prompt}]}],
+    data = try_models(IMAGE_MODELS, {"contents": [{"parts": [{"text": prompt}]}],
                                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}})
     for p in data["candidates"][0]["content"]["parts"]:
         d = p.get("inlineData") or p.get("inline_data")
