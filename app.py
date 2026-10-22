@@ -83,8 +83,8 @@ def read_file(f):
 def _post(model, body):
     for attempt in range(3):
         r = requests.post(f"{API}/v1beta/models/{model}:generateContent", params={"key": key}, json=body, timeout=300)
-        if r.status_code == 429 and attempt < 2:      # free-tier rate limit: wait and retry
-            time.sleep(25)
+        if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:   # quota or busy server: wait and retry
+            time.sleep(25 if r.status_code == 429 else 6 * (attempt + 1))
             continue
         if r.status_code != 200:
             try:
@@ -102,7 +102,7 @@ def try_models(models, body):
             return _post(m, body)
         except RuntimeError as e:
             last = e
-            if not str(e).startswith(("404", "403")):
+            if not str(e).startswith(("404", "403", "429", "500", "502", "503", "504")):
                 raise
     raise last
 
