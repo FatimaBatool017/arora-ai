@@ -1,26 +1,15 @@
+import base64
 import io
 import json
 import mimetypes
 import time
 
 import pandas as pd
+import requests
 import streamlit as st
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    # Safety net: install the package at runtime if the host skipped requirements.txt
-    import importlib
-    import subprocess
-    import sys
-
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "google-genai>=1.0"])
-    importlib.invalidate_caches()
-    from google import genai
-    from google.genai import types
-
 MODEL = "gemini-2.5-flash"          # change here if Google renames the Flash model
 IMAGE_MODEL = "gemini-2.5-flash-image"
+API = "https://generativelanguage.googleapis.com"
 BIG_FILE = 15 * 1024 * 1024         # above this, files go through the Gemini Files API
 
 st.set_page_config(page_title="StudyBuddy AI", page_icon="🎓", layout="wide")
@@ -46,7 +35,6 @@ if not key:
     st.title("🎓 StudyBuddy AI")
     st.info("Add your free Gemini API key in the sidebar (or in Streamlit secrets) to start.")
     st.stop()
-client = genai.Client(api_key=key)
 
 
 # ---------------------------------------------------------------- helpers
@@ -83,40 +71,66 @@ def read_file(f):
         return None
 
 
+def _post(model, body):
+    for attempt in range(3):
+        r = requests.post(f"{API}/v1beta/models/{model}:generateContent", params={"key": key}, json=body, timeout=300)
+        if r.status_code == 429 and attempt < 2:      # free-tier rate limit: wait and retry
+            time.sleep(25)
+            continue
+        if r.status_code != 200:
+            try:
+                msg = r.json()["error"]["message"]
+            except Exception:
+                msg = r.text
+            raise RuntimeError(f"{r.status_code}: {msg[:300]}")
+        return r.json()
+
+
+def upload_big(data, mime):
+    """Gemini Files API (resumable upload) for large files."""
+    h = {"X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
+         "X-Goog-Upload-Header-Content-Length": str(len(data)), "X-Goog-Upload-Header-Content-Type": mime,
+         "Content-Type": "application/json"}
+    r = requests.post(f"{API}/upload/v1beta/files", params={"key": key}, headers=h, json={"file": {"display_name": "material"}})
+    r.raise_for_status()
+    r = requests.post(r.headers["x-goog-upload-url"], data=data, timeout=600,
+                      headers={"X-Goog-Upload-Offset": "0", "X-Goog-Upload-Command": "upload, finalize"})
+    r.raise_for_status()
+    f = r.json()["file"]
+    while f.get("state") == "PROCESSING":
+        time.sleep(3)
+        f = requests.get(f"{API}/v1beta/{f['name']}", params={"key": key}).json()
+    return {"file_data": {"mime_type": mime, "file_uri": f["uri"]}}
+
+
 def to_parts(src):
     if "text" in src:
-        return [src["text"]]
+        return [{"text": src["text"]}]
     if len(src["bytes"]) < BIG_FILE:
-        return [types.Part.from_bytes(data=src["bytes"], mime_type=src["mime"])]
+        return [{"inline_data": {"mime_type": src["mime"], "data": base64.b64encode(src["bytes"]).decode()}}]
     if "_up" not in src:
-        up = client.files.upload(file=io.BytesIO(src["bytes"]), config=types.UploadFileConfig(mime_type=src["mime"]))
-        while up.state and up.state.name == "PROCESSING":
-            time.sleep(3)
-            up = client.files.get(name=up.name)
-        src["_up"] = up
+        src["_up"] = upload_big(src["bytes"], src["mime"])
     return [src["_up"]]
 
 
 def ask(prompt, src=None, as_json=False):
-    contents = (to_parts(src) if src else []) + [prompt]
-    cfg = types.GenerateContentConfig(response_mime_type="application/json") if as_json else None
-    for attempt in range(3):
-        try:
-            return client.models.generate_content(model=MODEL, contents=contents, config=cfg).text
-        except Exception as e:
-            if "429" in str(e) and attempt < 2:      # free-tier rate limit: wait and retry
-                time.sleep(25)
-                continue
-            raise
+    body = {"contents": [{"parts": (to_parts(src) if src else []) + [{"text": prompt}]}]}
+    if as_json:
+        body["generationConfig"] = {"responseMimeType": "application/json"}
+    data = _post(MODEL, body)
+    try:
+        return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+    except (KeyError, IndexError):
+        raise RuntimeError("Gemini returned no answer (the content may have been blocked). Try different material.")
 
 
 def make_image(prompt):
-    r = client.models.generate_content(
-        model=IMAGE_MODEL, contents=prompt,
-        config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]))
-    for p in r.candidates[0].content.parts:
-        if getattr(p, "inline_data", None) and p.inline_data.data:
-            return p.inline_data.data
+    data = _post(IMAGE_MODEL, {"contents": [{"parts": [{"text": prompt}]}],
+                               "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}})
+    for p in data["candidates"][0]["content"]["parts"]:
+        d = p.get("inlineData") or p.get("inline_data")
+        if d and d.get("data"):
+            return base64.b64decode(d["data"])
     return None
 
 
