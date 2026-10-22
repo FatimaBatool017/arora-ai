@@ -62,4 +62,5 @@ maxUploadSize = 1000
 - **Accuracy:** AI can make mistakes. Check important facts with your teacher or textbook.
 
 ## If something breaks
-- The model name is set at the top of `app.py` (`MODEL` and `IMAGE_MODEL`). If Google renames a model, change it there.
+- The model name is set at the top of `app.py` (`MODELS` and `IMAGE_MODELS`), or set `GEMINI_MODEL` in Streamlit secrets. If Google renames a model, change it there.
+  
