@@ -5,8 +5,19 @@ import time
 
 import pandas as pd
 import streamlit as st
-from google import genai
-from google.genai import types
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    # Safety net: install the package at runtime if the host skipped requirements.txt
+    import importlib
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "google-genai>=1.0"])
+    importlib.invalidate_caches()
+    from google import genai
+    from google.genai import types
 
 MODEL = "gemini-2.5-flash"          # change here if Google renames the Flash model
 IMAGE_MODEL = "gemini-2.5-flash-image"
